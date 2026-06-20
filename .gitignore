@@ -1,0 +1,9 @@
+node_modules/
+auth/
+__pycache__/
+*.pyc
+*.log
+.env
+# Ignore stray/test jpgs at the repo root, but DO commit the images/ cache.
+/*.jpg
+images/*.part

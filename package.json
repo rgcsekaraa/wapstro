@@ -1,0 +1,22 @@
+{
+  "name": "wapstro",
+  "version": "1.0.0",
+  "description": "Daily Tamil calendar image auto-poster to a WhatsApp group (Baileys + GitHub Actions).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "link": "node src/link.js",
+    "groups": "node src/groups.js",
+    "send": "node src/send.js",
+    "check": "node src/checkPattern.js",
+    "health": "node src/cacheHealth.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "libsodium-wrappers": "^0.7.15",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

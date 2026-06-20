@@ -1,0 +1,36 @@
+name: Daily Tamil Calendar to WhatsApp
+
+on:
+  schedule:
+    # 18:31 UTC = 00:01 IST (UTC+5:30), every day.
+    # Note: GitHub cron is best-effort and can be delayed several minutes,
+    # especially near the top of the hour. 18:31 is chosen to dodge :00 peaks.
+    - cron: "31 18 * * *"
+  workflow_dispatch: {} # lets you run it manually from the Actions tab
+
+# Prevent overlapping runs from stepping on the WA_CREDS update.
+concurrency:
+  group: whatsapp-daily
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - name: Download and post calendar image
+        run: npm run send
+        env:
+          WA_CREDS: ${{ secrets.WA_CREDS }}
+          GROUP_JID: ${{ secrets.GROUP_JID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          # Optional. Use {date} as a placeholder, e.g. "Tamil Calendar {date} 🙏"
+          IMAGE_CAPTION: ${{ vars.IMAGE_CAPTION }}

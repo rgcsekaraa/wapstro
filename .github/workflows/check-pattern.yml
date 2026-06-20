@@ -1,0 +1,27 @@
+name: Watch image naming pattern
+
+# Early-warning canary. Runs weekly; if the site changes its image naming
+# scheme this job fails, and GitHub emails you (the daily poster keeps working,
+# since it follows the page's real <img> src — this is just a heads-up to update
+# the docs/fallback).
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run check
+      - name: Alarm if the image cache is running low
+        run: npm run health
+        env:
+          CACHE_MIN_DAYS: "21" # fail (email me) if fewer than 21 days are buffered
