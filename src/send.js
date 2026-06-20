@@ -72,14 +72,27 @@ async function main() {
   // Persist refreshed session back to the secret only if it actually changed.
   const updated = dumpAuthDir(AUTH_DIR);
   if (updated !== WA_CREDS) {
-    console.log("Session changed; updating WA_CREDS secret...");
-    await updateRepoSecret({
-      repo: GITHUB_REPOSITORY,
-      token: GH_PAT,
-      name: "WA_CREDS",
-      value: updated,
-    });
-    console.log("WA_CREDS secret updated.");
+    if (GH_PAT) {
+      console.log("Session changed; updating WA_CREDS secret...");
+      try {
+        await updateRepoSecret({
+          repo: GITHUB_REPOSITORY,
+          token: GH_PAT,
+          name: "WA_CREDS",
+          value: updated,
+        });
+        console.log("WA_CREDS secret updated.");
+      } catch (e) {
+        // Don't fail the whole job just because the refresh failed — the image
+        // was already delivered. Surface it so the user can fix the PAT.
+        console.error(`WARN: could not update WA_CREDS secret: ${e.message}`);
+      }
+    } else {
+      console.warn(
+        "WARN: session changed but GH_PAT not set — skipping secret refresh. " +
+          "Set GH_PAT so the session stays fresh long-term."
+      );
+    }
   } else {
     console.log("Session unchanged; no secret update needed.");
   }
