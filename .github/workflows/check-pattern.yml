@@ -1,4 +1,5 @@
 name: Watch image naming pattern
+# (registered)
 
 # Early-warning canary. Runs weekly; if the site changes its image naming
 # scheme this job fails, and GitHub emails you (the daily poster keeps working,

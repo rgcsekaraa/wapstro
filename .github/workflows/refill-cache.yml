@@ -1,4 +1,5 @@
 name: Refill image cache
+# (registered)
 
 # Keeps ~1 year of calendar images buffered in images/ so the daily poster never
 # depends on the site updating at midnight. Runs weekly, downloads any newly
