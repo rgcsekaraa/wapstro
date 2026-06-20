@@ -2,32 +2,10 @@
 // image, post it to the configured group, then persist any refreshed session
 // state back into the WA_CREDS secret.
 
-import fs from "node:fs";
-import path from "node:path";
-import { downloadCalendarImage, istDateParts } from "./download.js";
+import { istDateParts } from "./download.js";
+import { getImage, cleanCaption } from "./image.js";
 import { connect } from "./connect.js";
 import { AUTH_DIR, restoreAuthDir, dumpAuthDir, updateRepoSecret } from "./lib.js";
-
-const CACHE_DIR = "images";
-
-// Prefer the pre-downloaded cache (fetch_year.py) so posting at 00:01 IST does
-// NOT depend on the site updating on time. Fall back to a live download only if
-// today's image isn't cached.
-async function getTodaysImage() {
-  const parts = istDateParts();
-  const cached = path.join(CACHE_DIR, `${parts.ddmmyyyy}.jpg`);
-  if (fs.existsSync(cached)) {
-    const buffer = fs.readFileSync(cached);
-    if (buffer.length >= 5000 && buffer.slice(0, 3).toString("hex") === "ffd8ff") {
-      return { buffer, url: cached, parts, via: "cache" };
-    }
-    console.warn(`⚠️  Cached file ${cached} looks invalid; falling back to live download.`);
-  } else {
-    console.warn(`⚠️  No cached image for ${parts.label}; falling back to live download. ` +
-      `Run fetch_year.py to refill the cache.`);
-  }
-  return downloadCalendarImage();
-}
 
 const {
   WA_CREDS,
@@ -52,16 +30,18 @@ async function main() {
   restoreAuthDir(WA_CREDS, AUTH_DIR);
 
   console.log("Resolving today's calendar image...");
-  const { buffer, url, parts, via } = await getTodaysImage();
+  const { buffer, url, parts, via } = await getImage(istDateParts());
   console.log(`Got ${buffer.length} bytes from ${url} (via ${via})`);
 
   console.log("Connecting to WhatsApp...");
   const { sock } = await connect({ printQR: false });
   console.log("Connected.");
 
-  const caption = IMAGE_CAPTION.trim()
-    ? IMAGE_CAPTION.replace("{date}", parts.label)
-    : `Tamil Daily Calendar — ${parts.label}`;
+  const caption = cleanCaption(
+    IMAGE_CAPTION.trim()
+      ? IMAGE_CAPTION.replace("{date}", parts.label)
+      : `Daily Raasi Palan ${parts.label}`
+  );
 
   await sock.sendMessage(GROUP_JID, { image: buffer, caption });
   console.log(`Sent image to ${GROUP_JID}`);
