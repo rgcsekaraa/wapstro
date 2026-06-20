@@ -40,4 +40,16 @@ export function decryptSession(keyHex) {
   return Buffer.concat([d.update(enc), d.final()]).toString("utf8");
 }
 
+// Returns the base64 creds to bootstrap from: the committed encrypted file if
+// present/decryptable, else the WA_CREDS secret. Null if neither is available.
+export function loadCredsBase64(encKey, fallbackB64) {
+  try {
+    const fromFile = decryptSession(encKey);
+    if (fromFile) return fromFile;
+  } catch {
+    /* fall through to the secret */
+  }
+  return fallbackB64 || null;
+}
+
 export { SESSION_FILE, STATE_DIR };

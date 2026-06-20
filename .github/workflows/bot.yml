@@ -1,0 +1,64 @@
+name: WhatsApp command bot (always-on)
+
+# Keeps the bot connected ~continuously using a public repo's unlimited Actions
+# minutes. Each cycle runs ~5.5h then exits; concurrency keeps exactly one cycle
+# running plus one queued successor, so a finished cycle is taken over instantly.
+# Messages that arrive during the brief handoff are queued by WhatsApp and
+# delivered on reconnect, so nothing is lost.
+#
+# NOTE: this uses GitHub Actions as a host, which is against GitHub's Acceptable
+# Use Policy. Chosen deliberately for a free always-on option; accept the risk.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # try to (re)start every 5 min; concurrency makes it a singleton
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: "Minutes to run this cycle"
+        default: "330"
+
+permissions:
+  contents: write # commit refreshed session + heartbeat for the next cycle
+
+concurrency:
+  group: wa-bot
+  cancel-in-progress: false # never kill the running cycle; extra triggers queue
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - name: Run bot cycle
+        run: npm run bot
+        env:
+          WA_CREDS: ${{ secrets.WA_CREDS }}
+          WA_ENC_KEY: ${{ secrets.WA_ENC_KEY }}
+          GROUP_JID: ${{ secrets.GROUP_JID }}
+          ALLOWED_SENDERS: ${{ vars.ALLOWED_SENDERS }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
+
+      - name: Persist session + heartbeat
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p state
+          date -u +"%Y-%m-%dT%H:%M:%SZ bot-cycle" > state/heartbeat.txt
+          git add state/
+          if git diff --cached --quiet; then
+            echo "No state changes to commit."
+          else
+            git commit -m "chore: bot session + heartbeat [skip ci]"
+            git pull --rebase --autostash origin master || true
+            git push || (git pull --rebase --autostash origin master && git push)
+          fi

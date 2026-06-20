@@ -8,8 +8,10 @@
 //
 // No caption ever contains an em/en dash (see cleanCaption()).
 //
-// Run:  npm run bot   (must stay running 24/7 to answer messages)
+// Run:  npm run bot                 (forever; for a VM / your own machine)
+//       RUN_MINUTES=330 npm run bot (time-boxed; for the GitHub Actions cycle)
 
+import fs from "node:fs";
 import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
@@ -19,13 +21,20 @@ import pino from "pino";
 import cron from "node-cron";
 import { partsFor, istDateParts } from "./download.js";
 import { getImage, cleanCaption } from "./image.js";
-import { AUTH_DIR } from "./lib.js";
+import { AUTH_DIR, restoreAuthDir, dumpAuthDir } from "./lib.js";
 import { interpret, partsToUTC, HELP } from "./commands.js";
+import { encryptSession, loadCredsBase64, STATE_DIR } from "./session.js";
 
 const logger = pino({ level: "fatal" });
 const TZ = "Asia/Kolkata";
 const SEND_GAP_MS = 1500; // polite gap between range images
+const DAILY_STATE = `${STATE_DIR}/last-daily.txt`;
 
+// If set (>0), run for that many minutes then exit cleanly. Used by the GitHub
+// Actions cycle (job runs ~5.5h, exits, next cycle takes over). 0 = run forever.
+const RUN_MINUTES = parseInt(process.env.RUN_MINUTES || "0", 10);
+
+const { WA_CREDS, WA_ENC_KEY } = process.env;
 const GROUP_JID = process.env.GROUP_JID || "";
 // Optional allowlist of phone numbers (digits only, comma-separated). Empty = any
 // personal chat may use the commands.
@@ -53,6 +62,41 @@ function messageText(m) {
     msg.imageMessage?.caption ||
     ""
   ).trim();
+}
+
+// Bootstrap the auth folder from the encrypted file / WA_CREDS secret if it isn't
+// already present on disk (the Actions runner starts with no auth/ folder).
+function ensureSession() {
+  if (fs.existsSync(`${AUTH_DIR}/creds.json`)) return true;
+  const creds = loadCredsBase64(WA_ENC_KEY, WA_CREDS);
+  if (!creds) return false;
+  restoreAuthDir(creds, AUTH_DIR);
+  console.log("Bootstrapped session from secret/encrypted file.");
+  return true;
+}
+
+// Persist the current session to the encrypted file so the workflow can commit
+// it for the next cycle. No-op without a key (e.g. running locally on a VM).
+function persistSession() {
+  if (!WA_ENC_KEY) return;
+  try {
+    encryptSession(dumpAuthDir(AUTH_DIR), WA_ENC_KEY);
+  } catch (e) {
+    console.error(`persistSession failed: ${e.message}`);
+  }
+}
+
+function alreadyPostedToday() {
+  try {
+    return fs.readFileSync(DAILY_STATE, "utf8").trim() === istDateParts().label;
+  } catch {
+    return false;
+  }
+}
+
+function markPostedToday() {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(DAILY_STATE, `${istDateParts().label}\n`);
 }
 
 // ---- sending -------------------------------------------------------------
@@ -100,11 +144,11 @@ async function handleCommand(sock, jid, action) {
   }
 }
 
-async function postDaily(sock) {
-  if (!GROUP_JID) {
-    console.warn("Daily post skipped: GROUP_JID not set.");
-    return;
-  }
+// Post today's image to the group once per IST day. Tracked in a state file so
+// it survives restarts (covers both the 00:01 cron and start-up catch-up), and
+// so two cycles never double-post.
+async function maybeDaily(sock) {
+  if (!GROUP_JID || alreadyPostedToday()) return;
   try {
     const parts = istDateParts();
     const { buffer, via } = await getImage(parts);
@@ -112,6 +156,8 @@ async function postDaily(sock) {
       image: buffer,
       caption: cleanCaption(`Daily Raasi Palan ${parts.label}`),
     });
+    markPostedToday();
+    persistSession();
     console.log(`[daily] posted ${parts.label} to group (via ${via}).`);
   } catch (e) {
     console.error(`[daily] FAILED: ${e.message}`);
@@ -141,6 +187,7 @@ async function start() {
   sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
       console.log("✅ Bot connected and listening.");
+      maybeDaily(sock); // catch-up: post today's image if not already done
     } else if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
@@ -175,10 +222,32 @@ async function start() {
 // ---- boot ----------------------------------------------------------------
 
 console.log("Starting wapstro bot...");
-console.log(`Group: ${GROUP_JID || "(none set)"} | allowlist: ${ALLOWED.length ? ALLOWED.join(",") : "ALL personal chats"}`);
+console.log(
+  `Group: ${GROUP_JID || "(none set)"} | allowlist: ${ALLOWED.length ? ALLOWED.join(",") : "ALL personal chats"} | run: ${RUN_MINUTES ? RUN_MINUTES + "m" : "forever"}`
+);
+
+if (!ensureSession()) {
+  console.error("No session available (need auth/ folder or WA_CREDS/WA_ENC_KEY). Run `npm run link`.");
+  process.exit(1);
+}
 
 await start();
 
-// Daily post at 00:01 IST.
-cron.schedule("1 0 * * *", () => sock && postDaily(sock), { timezone: TZ });
+// Daily post at 00:01 IST (maybeDaily de-dupes via the state file).
+cron.schedule("1 0 * * *", () => sock && maybeDaily(sock), { timezone: TZ });
 console.log("Daily post scheduled for 00:01 IST.");
+
+// Persist the session periodically so a crash still leaves a recent snapshot
+// for the workflow to commit.
+if (WA_ENC_KEY) setInterval(persistSession, 10 * 60 * 1000).unref?.();
+
+// Time-boxed mode (GitHub Actions cycle): run for RUN_MINUTES, then exit cleanly
+// so the next cycle takes over with a freshly committed session.
+if (RUN_MINUTES > 0) {
+  setTimeout(() => {
+    console.log(`Reached RUN_MINUTES=${RUN_MINUTES}; persisting session and exiting for handoff.`);
+    persistSession();
+    try { sock?.end(undefined); } catch {}
+    process.exit(0);
+  }, RUN_MINUTES * 60 * 1000);
+}
