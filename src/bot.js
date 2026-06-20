@@ -43,6 +43,9 @@ const ALLOWED = (process.env.ALLOWED_SENDERS || "")
   .map((s) => s.replace(/\D/g, ""))
   .filter(Boolean);
 
+// De-dupe message IDs within a process run (queued messages can be redelivered).
+const seenIds = new Set();
+
 // ---- helpers -------------------------------------------------------------
 
 function senderNumber(jid) {
@@ -55,13 +58,32 @@ function isAllowed(jid) {
 }
 
 function messageText(m) {
-  const msg = m.message || {};
+  let msg = m.message || {};
+  // unwrap disappearing / view-once / caption wrappers
+  msg =
+    msg.ephemeralMessage?.message ||
+    msg.viewOnceMessage?.message ||
+    msg.viewOnceMessageV2?.message ||
+    msg.documentWithCaptionMessage?.message ||
+    msg;
   return (
     msg.conversation ||
     msg.extendedTextMessage?.text ||
     msg.imageMessage?.caption ||
     ""
   ).trim();
+}
+
+// A personal (non-group, non-broadcast) chat. Accepts both @s.whatsapp.net and
+// the newer @lid identifiers that current WhatsApp uses for some 1:1 chats.
+function isPersonalChat(jid) {
+  return (
+    jid &&
+    !jid.endsWith("@g.us") &&
+    !jid.endsWith("@broadcast") &&
+    jid !== "status@broadcast" &&
+    !jid.endsWith("@newsletter")
+  );
 }
 
 // Bootstrap the auth folder from the encrypted file / WA_CREDS secret if it isn't
@@ -200,17 +222,29 @@ async function start() {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    // "notify" = realtime; "append" = messages delivered on (re)connect that were
+    // sent while we were briefly offline (the handoff window). Handle both, but
+    // guard by recency so we never reply to old chat history on reconnect.
+    if (type !== "notify" && type !== "append") return;
     for (const m of messages) {
       try {
+        const id = m.key?.id;
+        if (id && seenIds.has(id)) continue;
+        if (id) seenIds.add(id);
+
         if (m.key.fromMe) continue;
         const jid = m.key.remoteJid || "";
-        if (!jid.endsWith("@s.whatsapp.net")) continue; // personal chats only
+        if (!isPersonalChat(jid)) continue; // ignore groups/broadcast/status
         if (!isAllowed(jid)) continue;
 
-        const action = interpret(messageText(m));
+        const ageSec = Date.now() / 1000 - Number(m.messageTimestamp || 0);
+        const text = messageText(m);
+        console.log(`[msg] type=${type} from=${senderNumber(jid)} age=${Math.round(ageSec)}s text=${JSON.stringify(text)}`);
+        if (Number(m.messageTimestamp) && ageSec > 900) continue; // skip stale history
+
+        const action = interpret(text);
         if (action.type === "ignore") continue;
-        console.log(`[cmd] ${senderNumber(jid)}: "${messageText(m)}" -> ${action.type}`);
+        console.log(`[cmd] ${senderNumber(jid)} -> ${action.type}`);
         await handleCommand(sock, jid, action);
       } catch (e) {
         console.error(`message handling error: ${e.message}`);
