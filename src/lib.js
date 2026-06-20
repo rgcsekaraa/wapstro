@@ -3,7 +3,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import _sodium from "libsodium-wrappers";
+import { createRequire } from "node:module";
+
+// libsodium-wrappers ships a broken ESM entry under Node, so load its working
+// CommonJS build instead.
+const require = createRequire(import.meta.url);
+const _sodium = require("libsodium-wrappers");
 
 export const AUTH_DIR = "auth";
 
