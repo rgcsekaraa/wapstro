@@ -58,6 +58,114 @@ Check the group received the image. After that it runs automatically every day.
 
 ---
 
+## On-demand WhatsApp commands
+
+For `/date` and `/range` replies, the bot must stay connected to WhatsApp. A
+scheduled one-shot workflow can post the daily image, but it cannot receive
+messages while it is not running.
+
+Supported personal-chat commands:
+```text
+/date 24-05-2026
+/24-05-2026
+/range 24-05-2026 29-05-2026
+/help
+```
+
+The bot ignores groups, broadcasts, status, and ordinary non-command chat. Set
+`ALLOWED_SENDERS` to a comma-separated list of phone numbers if only specific
+people should be able to request images.
+
+### Free always-on option
+
+Use an Always Free Linux VM, such as Oracle Cloud Always Free, and run:
+```bash
+git clone <your-repo-url> wapstro
+cd wapstro
+npm ci
+npm run link
+BOT_DAILY_ENABLED=false GROUP_JID="120363...@g.us" npm run bot
+```
+
+For a long-running service, keep the process alive with `systemd`, `pm2`, or
+`tmux`. Required environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `GROUP_JID` | Target WhatsApp group for the daily 00:01 IST post. |
+| `ALLOWED_SENDERS` | Optional comma-separated personal numbers allowed to use commands. |
+| `BOT_DAILY_ENABLED` | Set to `false` if GitHub Actions should keep handling the daily group post. |
+| `WA_ENC_KEY` | Optional 64-character hex key if you want encrypted session snapshots. |
+| `WA_CREDS` | Optional bootstrap session if `auth/` is not already present. |
+
+If the always-on bot is enabled, either disable the daily GitHub Actions workflow
+or run the bot with `BOT_DAILY_ENABLED=false`. Otherwise both can post the daily
+image.
+
+There is also `.github/workflows/bot.yml`, but using GitHub Actions as an
+always-on host is not a good long-term free solution. Use a VM for command
+replies if you want this to be reliable and policy-safe.
+
+### Heartbeat for sleeping hosts
+
+`npm run bot` can expose a lightweight health endpoint for hosts such as
+Hugging Face Spaces or Koyeb:
+
+```bash
+PORT=7860 BOT_DAILY_ENABLED=false GROUP_JID="120363...@g.us" npm run bot
+```
+
+Health URL:
+```text
+https://your-host.example/health
+```
+
+To keep a sleeping host warm, add a GitHub Actions repository variable:
+
+| Variable | Value |
+|---|---|
+| `HEARTBEAT_URL` | `https://your-host.example/health` |
+
+The **Keep bot host awake** workflow runs every 6 hours and calls
+`npm run heartbeat`. For Hugging Face Spaces free CPU hardware, this is enough
+to stay below the documented idle sleep window, but an external monitor like
+UptimeRobot at 5-10 minute intervals is still more responsive.
+
+### Oracle VM service setup
+
+After creating an Oracle Always Free Ubuntu VM and opening SSH, run this on the
+VM:
+
+```bash
+git clone <your-repo-url> wapstro
+cd wapstro
+sudo bash deploy/oracle-vm-setup.sh <your-repo-url>
+```
+
+Then edit the service environment:
+```bash
+sudo nano /etc/wapstro.env
+```
+
+If the VM does not already have `auth/` restored from `WA_CREDS`, link WhatsApp
+on the VM:
+
+```bash
+sudo -iu wapstro
+cd /opt/wapstro
+npm run link
+exit
+```
+
+Start and inspect the service:
+
+```bash
+sudo systemctl enable --now wapstro
+journalctl -u wapstro -f
+```
+
+---
+
 ## Reliability: the image cache (important)
 
 The site doesn't always have the new day's image live *exactly* at 00:01 IST — but it

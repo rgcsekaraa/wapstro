@@ -45,6 +45,7 @@ jobs:
           WA_ENC_KEY: ${{ secrets.WA_ENC_KEY }}
           GROUP_JID: ${{ secrets.GROUP_JID }}
           ALLOWED_SENDERS: ${{ vars.ALLOWED_SENDERS }}
+          BOT_DAILY_ENABLED: "false"
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
 
       - name: Persist session + heartbeat

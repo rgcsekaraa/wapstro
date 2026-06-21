@@ -1,0 +1,19 @@
+[Unit]
+Description=wapstro WhatsApp command bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wapstro
+WorkingDirectory=/opt/wapstro
+EnvironmentFile=/etc/wapstro.env
+ExecStart=/usr/bin/npm run bot
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

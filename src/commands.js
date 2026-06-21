@@ -10,8 +10,11 @@ export const HELP = cleanCaption(
   [
     "Raasi Palan bot. Send me:",
     "",
-    "/24-05-2026",
+    "/date 24-05-2026",
     "   the calendar image for that date",
+    "",
+    "/24-05-2026",
+    "   shortcut for /date",
     "",
     "/range 24-05-2026 29-05-2026",
     "   an image for each day in the range",
@@ -46,6 +49,28 @@ export function interpret(textRaw) {
 
   const lower = text.toLowerCase();
   if (lower === "/help" || lower === "help" || lower === "/start") return { type: "help" };
+
+  // /date A  (slash optional; accept - / . separators)
+  const dateMatch = /^\/?date\s+(\S+)\s*$/i.exec(text);
+  if (dateMatch) {
+    const value = normalizeSep(dateMatch[1]);
+    const parts = parseDate(value);
+    if (!parts) {
+      return {
+        type: "error",
+        message: `"${dateMatch[1]}" is not a valid date. Use: /date DD-MM-YYYY\nExample: /date 24-05-2026`,
+      };
+    }
+    return { type: "single", parts };
+  }
+
+  // bare "/date" / "date" without a valid date
+  if (/^\/?date\b/i.test(text)) {
+    return {
+      type: "error",
+      message: "Date needs one date. Use: /date DD-MM-YYYY\nExample: /date 24-05-2026",
+    };
+  }
 
   // /range A B  (slash optional, extra whitespace tolerated)
   const rangeMatch = /^\/?range\s+(\S+)\s+(\S+)\s*$/i.exec(text);

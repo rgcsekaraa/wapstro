@@ -12,7 +12,9 @@
     "send": "node src/send.js",
     "check": "node src/checkPattern.js",
     "health": "node src/cacheHealth.js",
-    "bot": "node src/bot.js"
+    "heartbeat": "node src/heartbeat.js",
+    "bot": "node src/bot.js",
+    "test": "node --test test/*.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",

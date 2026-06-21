@@ -12,6 +12,7 @@
 //       RUN_MINUTES=330 npm run bot (time-boxed; for the GitHub Actions cycle)
 
 import fs from "node:fs";
+import http from "node:http";
 import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
@@ -33,9 +34,19 @@ const DAILY_STATE = `${STATE_DIR}/last-daily.txt`;
 // If set (>0), run for that many minutes then exit cleanly. Used by the GitHub
 // Actions cycle (job runs ~5.5h, exits, next cycle takes over). 0 = run forever.
 const RUN_MINUTES = parseInt(process.env.RUN_MINUTES || "0", 10);
+const HEALTH_PORT = parseInt(
+  process.env.PORT ||
+    process.env.HEALTH_PORT ||
+    (process.env.SPACE_ID || process.env.SPACE_HOST ? "7860" : "0"),
+  10
+);
+const HEALTH_HOST = process.env.HEALTH_HOST || "0.0.0.0";
 
 const { WA_CREDS, WA_ENC_KEY } = process.env;
 const GROUP_JID = process.env.GROUP_JID || "";
+const DAILY_ENABLED = (process.env.BOT_DAILY_ENABLED || "true").toLowerCase() !== "false";
+const ALLOW_GROUP_COMMANDS = (process.env.ALLOW_GROUP_COMMANDS || "false").toLowerCase() === "true";
+const ALLOW_SELF_COMMANDS = (process.env.ALLOW_SELF_COMMANDS || "false").toLowerCase() === "true";
 // Optional allowlist of phone numbers (digits only, comma-separated). Empty = any
 // personal chat may use the commands.
 const ALLOWED = (process.env.ALLOWED_SENDERS || "")
@@ -48,6 +59,35 @@ const seenIds = new Set();
 
 // ---- helpers -------------------------------------------------------------
 
+function startHealthServer() {
+  if (!HEALTH_PORT) return;
+
+  const server = http.createServer((req, res) => {
+    if (req.url === "/health" || req.url === "/") {
+      const body = JSON.stringify({
+        ok: true,
+        connected: Boolean(sock?.user),
+        daily: DAILY_ENABLED,
+        uptimeSec: Math.round(process.uptime()),
+        now: new Date().toISOString(),
+      });
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      res.end(body);
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found\n");
+  });
+
+  server.listen(HEALTH_PORT, HEALTH_HOST, () => {
+    console.log(`Health endpoint listening on ${HEALTH_HOST}:${HEALTH_PORT}/health`);
+  });
+}
+
 function senderNumber(jid) {
   return (jid || "").split("@")[0].split(":")[0].replace(/\D/g, "");
 }
@@ -55,6 +95,16 @@ function senderNumber(jid) {
 function isAllowed(jid) {
   if (ALLOWED.length === 0) return true;
   return ALLOWED.includes(senderNumber(jid));
+}
+
+function commandSenderJid(m) {
+  return m.key?.participant || m.key?.remoteJid || "";
+}
+
+function safeSenderLabel(jid) {
+  const n = senderNumber(jid);
+  if (!n) return "unknown";
+  return `...${n.slice(-4)}`;
 }
 
 function messageText(m) {
@@ -84,6 +134,11 @@ function isPersonalChat(jid) {
     jid !== "status@broadcast" &&
     !jid.endsWith("@newsletter")
   );
+}
+
+function isCommandChat(jid) {
+  if (isPersonalChat(jid)) return true;
+  return ALLOW_GROUP_COMMANDS && jid?.endsWith("@g.us");
 }
 
 // Bootstrap the auth folder from the encrypted file / WA_CREDS secret if it isn't
@@ -170,7 +225,7 @@ async function handleCommand(sock, jid, action) {
 // it survives restarts (covers both the 00:01 cron and start-up catch-up), and
 // so two cycles never double-post.
 async function maybeDaily(sock) {
-  if (!GROUP_JID || alreadyPostedToday()) return;
+  if (!DAILY_ENABLED || !GROUP_JID || alreadyPostedToday()) return;
   try {
     const parts = istDateParts();
     const { buffer, via } = await getImage(parts);
@@ -232,19 +287,20 @@ async function start() {
         if (id && seenIds.has(id)) continue;
         if (id) seenIds.add(id);
 
-        if (m.key.fromMe) continue;
+        if (m.key.fromMe && !ALLOW_SELF_COMMANDS) continue;
         const jid = m.key.remoteJid || "";
-        if (!isPersonalChat(jid)) continue; // ignore groups/broadcast/status
-        if (!isAllowed(jid)) continue;
+        if (!isCommandChat(jid)) continue; // ignore disabled groups/broadcast/status
+        const senderJid = commandSenderJid(m);
+        if (!isAllowed(senderJid)) continue;
 
         const ageSec = Date.now() / 1000 - Number(m.messageTimestamp || 0);
         const text = messageText(m);
-        console.log(`[msg] type=${type} from=${senderNumber(jid)} age=${Math.round(ageSec)}s text=${JSON.stringify(text)}`);
+        console.log(`[msg] type=${type} chatType=${jid.endsWith("@g.us") ? "group" : "personal"} from=${safeSenderLabel(senderJid)} age=${Math.round(ageSec)}s chars=${text.length}`);
         if (Number(m.messageTimestamp) && ageSec > 900) continue; // skip stale history
 
         const action = interpret(text);
         if (action.type === "ignore") continue;
-        console.log(`[cmd] ${senderNumber(jid)} -> ${action.type}`);
+        console.log(`[cmd] ${safeSenderLabel(senderJid)} -> ${action.type}`);
         await handleCommand(sock, jid, action);
       } catch (e) {
         console.error(`message handling error: ${e.message}`);
@@ -257,8 +313,10 @@ async function start() {
 
 console.log("Starting wapstro bot...");
 console.log(
-  `Group: ${GROUP_JID || "(none set)"} | allowlist: ${ALLOWED.length ? ALLOWED.join(",") : "ALL personal chats"} | run: ${RUN_MINUTES ? RUN_MINUTES + "m" : "forever"}`
+  `Group: ${GROUP_JID || "(none set)"} | daily: ${DAILY_ENABLED ? "on" : "off"} | group commands: ${ALLOW_GROUP_COMMANDS ? "on" : "off"} | self commands: ${ALLOW_SELF_COMMANDS ? "on" : "off"} | allowlist: ${ALLOWED.length ? ALLOWED.join(",") : "ALL senders"} | run: ${RUN_MINUTES ? RUN_MINUTES + "m" : "forever"}`
 );
+
+startHealthServer();
 
 if (!ensureSession()) {
   console.error("No session available (need auth/ folder or WA_CREDS/WA_ENC_KEY). Run `npm run link`.");
@@ -268,8 +326,12 @@ if (!ensureSession()) {
 await start();
 
 // Daily post at 00:01 IST (maybeDaily de-dupes via the state file).
-cron.schedule("1 0 * * *", () => sock && maybeDaily(sock), { timezone: TZ });
-console.log("Daily post scheduled for 00:01 IST.");
+if (DAILY_ENABLED) {
+  cron.schedule("1 0 * * *", () => sock && maybeDaily(sock), { timezone: TZ });
+  console.log("Daily post scheduled for 00:01 IST.");
+} else {
+  console.log("Daily post disabled for this bot process.");
+}
 
 // Persist the session periodically so a crash still leaves a recent snapshot
 // for the workflow to commit.
