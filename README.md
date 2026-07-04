@@ -1,8 +1,8 @@
 # wapstro
 
-Posts Tamil calendar images to a WhatsApp group. For **exact 00:01 IST** delivery,
-run the always-on bot on a VM; GitHub Actions scheduled workflows are only
-best-effort and can be delayed.
+Posts Tamil calendar images to a WhatsApp group. In GitHub Actions-only mode, the
+workflow starts early and waits inside the runner until **00:01 IST** before
+sending.
 
 - **Scrapes the site's date-specific page** and downloads whatever `<img>` it actually references — so if the site changes its folder/filename scheme, this keeps working (the old `<year>/<DDMMYYYY>.jpg` pattern is only a fallback). Handles the site's hotlink protection.
 - Sends it to **one WhatsApp group** from **your own number** using [Baileys](https://github.com/WhiskeySockets/Baileys).
@@ -209,6 +209,10 @@ always topped up without you doing anything.
 ## Notes & limits
 
 - **Cron timing:** GitHub Actions cron is *best-effort* and can be delayed by minutes (occasionally more). If exact 00:01 matters, this approach can't guarantee it.
+- **GitHub-only timing:** the daily workflow starts at `12:37 UTC` and waits
+  inside the job until `18:31 UTC` / `00:01 IST`. This avoids normal GitHub
+  schedule jitter, but if GitHub delays starting the runner until after
+  `18:31 UTC`, the post will still be late.
 - **Re-linking:** If WhatsApp logs out the linked device (rare, but possible after long gaps or a manual unlink), the job fails — just re-run `npm run link` and update the `WA_CREDS` secret.
 - **Secret size:** GitHub secrets cap at 64 KB. A single low-volume sender's session stays well under this.
 - **Image not yet published:** If the day's image isn't on the site at run time, the job errors out (no message sent) rather than posting a wrong/blank image.

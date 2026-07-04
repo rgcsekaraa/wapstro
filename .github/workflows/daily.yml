@@ -4,7 +4,8 @@ on:
   schedule:
     # Start early, then wait in-run until 18:31 UTC = 00:01 IST. This avoids most
     # GitHub schedule dispatch jitter, but GitHub can still start the runner late.
-    - cron: "31 15 * * *"
+    # GitHub-hosted jobs max out at 6h, so 12:37 UTC gives a ~5h54m wait window.
+    - cron: "37 12 * * *"
   workflow_dispatch:
     inputs:
       target_group:
@@ -29,7 +30,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 220
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +45,7 @@ jobs:
         run: node src/waitForSendTime.js
         env:
           STRICT_SEND_UTC: "18:31"
-          STRICT_SEND_MAX_WAIT_MS: "14400000"
+          STRICT_SEND_MAX_WAIT_MS: "21600000"
 
       - name: Download and post calendar image
         run: npm run send
