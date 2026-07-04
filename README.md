@@ -1,6 +1,8 @@
 # wapstro
 
-Posts the **Tamil Daily Calendar** image to a WhatsApp group **every day at 00:01 IST**, automatically, via GitHub Actions.
+Posts Tamil calendar images to a WhatsApp group. For **exact 00:01 IST** delivery,
+run the always-on bot on a VM; GitHub Actions scheduled workflows are only
+best-effort and can be delayed.
 
 - **Scrapes the site's date-specific page** and downloads whatever `<img>` it actually references — so if the site changes its folder/filename scheme, this keeps working (the old `<year>/<DDMMYYYY>.jpg` pattern is only a fallback). Handles the site's hotlink protection.
 - Sends it to **one WhatsApp group** from **your own number** using [Baileys](https://github.com/WhiskeySockets/Baileys).
@@ -84,7 +86,7 @@ git clone <your-repo-url> wapstro
 cd wapstro
 npm ci
 npm run link
-BOT_DAILY_ENABLED=false GROUP_JID="120363...@g.us" npm run bot
+BOT_DAILY_ENABLED=true GROUP_JID="120363...@g.us" npm run bot
 ```
 
 For a long-running service, keep the process alive with `systemd`, `pm2`, or
@@ -93,14 +95,17 @@ For a long-running service, keep the process alive with `systemd`, `pm2`, or
 | Variable | Purpose |
 |---|---|
 | `GROUP_JID` | Target WhatsApp group for the daily 00:01 IST post. |
+| `IMAGE_CAPTION` | Optional caption for the first image. `{date}` is replaced. |
+| `SRIRANGAM_IMAGE_CAPTION` | Optional caption for the Srirangam image. `{date}` is replaced. |
 | `ALLOWED_SENDERS` | Optional comma-separated personal numbers allowed to use commands. |
-| `BOT_DAILY_ENABLED` | Set to `false` if GitHub Actions should keep handling the daily group post. |
+| `BOT_DAILY_ENABLED` | Set to `true` on the exact-time VM. Disable the GitHub daily schedule to avoid duplicate posts. |
+| `BOT_DAILY_CATCH_UP` | Keep `false` for strict timing. Set `true` only if late catch-up posts are acceptable after downtime. |
 | `WA_ENC_KEY` | Optional 64-character hex key if you want encrypted session snapshots. |
 | `WA_CREDS` | Optional bootstrap session if `auth/` is not already present. |
 
-If the always-on bot is enabled, either disable the daily GitHub Actions workflow
-or run the bot with `BOT_DAILY_ENABLED=false`. Otherwise both can post the daily
-image.
+For exact delivery, the VM service must be the daily sender. Disable the scheduled
+trigger in `.github/workflows/daily.yml` after the VM is confirmed running;
+otherwise GitHub can still send a delayed duplicate.
 
 There is also `.github/workflows/bot.yml`, but using GitHub Actions as an
 always-on host is not a good long-term free solution. Use a VM for command

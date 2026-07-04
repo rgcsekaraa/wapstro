@@ -22,6 +22,7 @@ import pino from "pino";
 import cron from "node-cron";
 import { partsFor, istDateParts } from "./download.js";
 import { getImage, cleanCaption } from "./image.js";
+import { downloadSrirangamForParts } from "./srirangam.js";
 import { AUTH_DIR, restoreAuthDir, dumpAuthDir } from "./lib.js";
 import { interpret, partsToUTC, HELP } from "./commands.js";
 import { encryptSession, loadCredsBase64, STATE_DIR } from "./session.js";
@@ -44,7 +45,10 @@ const HEALTH_HOST = process.env.HEALTH_HOST || "0.0.0.0";
 
 const { WA_CREDS, WA_ENC_KEY } = process.env;
 const GROUP_JID = process.env.GROUP_JID || "";
+const IMAGE_CAPTION = process.env.IMAGE_CAPTION || "";
+const SRIRANGAM_IMAGE_CAPTION = process.env.SRIRANGAM_IMAGE_CAPTION || "";
 const DAILY_ENABLED = (process.env.BOT_DAILY_ENABLED || "true").toLowerCase() !== "false";
+const DAILY_CATCH_UP = (process.env.BOT_DAILY_CATCH_UP || "false").toLowerCase() === "true";
 const ALLOW_GROUP_COMMANDS = (process.env.ALLOW_GROUP_COMMANDS || "false").toLowerCase() === "true";
 const ALLOW_SELF_COMMANDS = (process.env.ALLOW_SELF_COMMANDS || "false").toLowerCase() === "true";
 // Optional allowlist of phone numbers (digits only, comma-separated). Empty = any
@@ -68,6 +72,7 @@ function startHealthServer() {
         ok: true,
         connected: Boolean(sock?.user),
         daily: DAILY_ENABLED,
+        dailyCatchUp: DAILY_CATCH_UP,
         uptimeSec: Math.round(process.uptime()),
         now: new Date().toISOString(),
       });
@@ -222,20 +227,40 @@ async function handleCommand(sock, jid, action) {
 }
 
 // Post today's image to the group once per IST day. Tracked in a state file so
-// it survives restarts (covers both the 00:01 cron and start-up catch-up), and
-// so two cycles never double-post.
+// it survives restarts and so two cycles never double-post.
 async function maybeDaily(sock) {
   if (!DAILY_ENABLED || !GROUP_JID || alreadyPostedToday()) return;
   try {
     const parts = istDateParts();
-    const { buffer, via } = await getImage(parts);
+    const primary = await getImage(parts);
+    const srirangam = await downloadSrirangamForParts(parts);
+
+    const primaryCaption = cleanCaption(
+      IMAGE_CAPTION.trim()
+        ? IMAGE_CAPTION.replace("{date}", parts.label)
+        : `Daily Raasi Palan ${parts.label}`
+    );
     await sock.sendMessage(GROUP_JID, {
-      image: buffer,
-      caption: cleanCaption(`Daily Raasi Palan ${parts.label}`),
+      image: primary.buffer,
+      caption: primaryCaption,
     });
+
+    const srirangamCaption = cleanCaption(
+      SRIRANGAM_IMAGE_CAPTION.trim()
+        ? SRIRANGAM_IMAGE_CAPTION.replace("{date}", parts.label)
+        : `Srirangam Tamil Calendar ${parts.label}`
+    );
+    await sock.sendMessage(GROUP_JID, {
+      image: srirangam.buffer,
+      caption: srirangamCaption,
+    });
+
     markPostedToday();
     persistSession();
-    console.log(`[daily] posted ${parts.label} to group (via ${via}).`);
+    console.log(
+      `[daily] posted ${parts.label} to group ` +
+        `(primary via ${primary.via}; srirangam via ${srirangam.via}).`
+    );
   } catch (e) {
     console.error(`[daily] FAILED: ${e.message}`);
   }
@@ -264,7 +289,7 @@ async function start() {
   sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
     if (connection === "open") {
       console.log("✅ Bot connected and listening.");
-      maybeDaily(sock); // catch-up: post today's image if not already done
+      if (DAILY_CATCH_UP) maybeDaily(sock);
     } else if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
@@ -313,7 +338,7 @@ async function start() {
 
 console.log("Starting wapstro bot...");
 console.log(
-  `Group: ${GROUP_JID || "(none set)"} | daily: ${DAILY_ENABLED ? "on" : "off"} | group commands: ${ALLOW_GROUP_COMMANDS ? "on" : "off"} | self commands: ${ALLOW_SELF_COMMANDS ? "on" : "off"} | allowlist: ${ALLOWED.length ? ALLOWED.join(",") : "ALL senders"} | run: ${RUN_MINUTES ? RUN_MINUTES + "m" : "forever"}`
+  `Group: ${GROUP_JID || "(none set)"} | daily: ${DAILY_ENABLED ? "on" : "off"} | catch-up: ${DAILY_CATCH_UP ? "on" : "off"} | group commands: ${ALLOW_GROUP_COMMANDS ? "on" : "off"} | self commands: ${ALLOW_SELF_COMMANDS ? "on" : "off"} | allowlist: ${ALLOWED.length ? ALLOWED.join(",") : "ALL senders"} | run: ${RUN_MINUTES ? RUN_MINUTES + "m" : "forever"}`
 );
 
 startHealthServer();
