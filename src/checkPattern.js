@@ -13,6 +13,7 @@ import {
   istDateParts,
   datedPageUrl,
   extractMainImageSrc,
+  knownImageSrcs,
 } from "./download.js";
 
 const BROWSER_UA =
@@ -28,7 +29,7 @@ async function main() {
   for (let i = 0; i < 3; i++) {
     const parts = istDateParts(new Date(Date.now() + i * DAY_MS));
     const pageUrl = datedPageUrl(parts);
-    const expected = `${parts.year}/${parts.ddmmyyyy}.jpg`;
+    const expected = knownImageSrcs(parts);
 
     try {
       const res = await fetch(pageUrl, { headers: { "User-Agent": BROWSER_UA } });
@@ -40,10 +41,10 @@ async function main() {
         failures++;
         continue;
       }
-      if (src === expected) {
+      if (expected.includes(src)) {
         console.log(`✓ ${parts.label}: src "${src}" matches expected pattern.`);
       } else {
-        console.warn(`⚠ ${parts.label}: PATTERN CHANGED. expected "${expected}", got "${src}".`);
+        console.warn(`⚠ ${parts.label}: PATTERN CHANGED. expected one of ${expected.join(", ")}, got "${src}".`);
         changed = true;
       }
     } catch (e) {

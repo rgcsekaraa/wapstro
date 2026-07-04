@@ -40,9 +40,19 @@ export function datedPageUrl(parts) {
   return `${SITE}/tamil_daily_calendar.php?day=${parts.day}&month=${parts.mm}&year=${parts.year}&msg=Tamil%20Calendar%20Today`;
 }
 
-// The historically-known direct image URL, used only as a fallback.
+export function fallbackImageUrls(parts) {
+  const unpaddedDay = `${SITE}/${parts.year}/${parts.day}${parts.mm}${parts.year}.jpg`;
+  const padded = `${SITE}/${parts.year}/${parts.ddmmyyyy}.jpg`;
+  return [...new Set([unpaddedDay, padded])];
+}
+
+export function knownImageSrcs(parts) {
+  return fallbackImageUrls(parts).map((url) => url.replace(`${SITE}/`, ""));
+}
+
+// The direct image URL, used only as a fallback.
 export function fallbackImageUrl(parts) {
-  return `${SITE}/${parts.year}/${parts.ddmmyyyy}.jpg`;
+  return fallbackImageUrls(parts)[0];
 }
 
 // Pulls the main calendar image src out of the page HTML.
@@ -111,10 +121,17 @@ export async function downloadForParts(parts) {
     console.warn(`⚠️  Scrape failed for ${parts.label} (${e.message}); trying fallback URL.`);
   }
 
-  // 2) Fallback: the known direct pattern.
-  const imageUrl = fallbackImageUrl(parts);
-  const buffer = await fetchImage(imageUrl, pageUrl);
-  return { buffer, url: imageUrl, parts, via: "fallback", patternChanged: false };
+  // 2) Fallback: try known direct patterns.
+  let lastError = null;
+  for (const imageUrl of fallbackImageUrls(parts)) {
+    try {
+      const buffer = await fetchImage(imageUrl, pageUrl);
+      return { buffer, url: imageUrl, parts, via: "fallback", patternChanged: false };
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
 }
 
 // Convenience: live-download for "today" (IST).

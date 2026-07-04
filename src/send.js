@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import { istDateParts } from "./download.js";
 import { getImage, cleanCaption } from "./image.js";
+import { downloadSrirangamForParts } from "./srirangam.js";
 import { connect } from "./connect.js";
 import { AUTH_DIR, restoreAuthDir, dumpAuthDir, updateRepoSecret } from "./lib.js";
 import { encryptSession, decryptSession, STATE_DIR } from "./session.js";
@@ -16,9 +17,12 @@ const {
   WA_CREDS,
   WA_ENC_KEY,
   GROUP_JID,
+  TEST_GROUP_JID,
+  SEND_TARGET_GROUP = "production",
   GH_PAT,
   GITHUB_REPOSITORY,
   IMAGE_CAPTION = "",
+  SRIRANGAM_IMAGE_CAPTION = "",
 } = process.env;
 
 function fail(msg) {
@@ -26,11 +30,29 @@ function fail(msg) {
   process.exit(1);
 }
 
-async function main() {
-  if (!GROUP_JID) fail("GROUP_JID is not set. Run `npm run groups` to find it.");
-  if (!GROUP_JID.endsWith("@g.us")) {
-    fail(`GROUP_JID "${GROUP_JID}" doesn't look like a group id (should end in @g.us).`);
+function targetGroupJid() {
+  const target = SEND_TARGET_GROUP.toLowerCase();
+  if (target === "test") {
+    if (!TEST_GROUP_JID) fail("SEND_TARGET_GROUP=test but TEST_GROUP_JID is not set.");
+    return { jid: TEST_GROUP_JID, label: "test" };
   }
+  if (target !== "production") {
+    fail(`SEND_TARGET_GROUP must be "production" or "test", got "${SEND_TARGET_GROUP}".`);
+  }
+  if (!GROUP_JID) fail("GROUP_JID is not set. Run `npm run groups` to find it.");
+  return { jid: GROUP_JID, label: "production" };
+}
+
+function assertGroupJid(jid, name) {
+  if (!jid.endsWith("@g.us")) {
+    fail(`${name} "${jid}" doesn't look like a group id (should end in @g.us).`);
+  }
+}
+
+async function main() {
+  const target = targetGroupJid();
+  assertGroupJid(target.jid, `${target.label} group`);
+  console.log(`Using ${target.label} WhatsApp group.`);
 
   // Load session: prefer the committed encrypted file, fall back to the secret.
   let creds = null;
@@ -47,9 +69,15 @@ async function main() {
   }
   restoreAuthDir(creds, AUTH_DIR);
 
-  console.log("Resolving today's calendar image...");
-  const { buffer, url, parts, via } = await getImage(istDateParts());
-  console.log(`Got ${buffer.length} bytes from ${url} (via ${via})`);
+  const parts = istDateParts();
+
+  console.log("Resolving today's Tamil Daily Calendar image...");
+  const primary = await getImage(parts);
+  console.log(`Got ${primary.buffer.length} bytes from ${primary.url} (via ${primary.via})`);
+
+  console.log("Resolving today's Srirangam Tamil calendar image...");
+  const srirangam = await downloadSrirangamForParts(parts);
+  console.log(`Got ${srirangam.buffer.length} bytes from ${srirangam.url} (via ${srirangam.via})`);
 
   console.log("Connecting to WhatsApp...");
   const { sock } = await connect({ printQR: false });
@@ -61,8 +89,17 @@ async function main() {
       : `Daily Raasi Palan ${parts.label}`
   );
 
-  await sock.sendMessage(GROUP_JID, { image: buffer, caption });
-  console.log(`Sent image to ${GROUP_JID}`);
+  await sock.sendMessage(target.jid, { image: primary.buffer, caption });
+  console.log(`Sent Tamil Daily Calendar image to ${target.label} group.`);
+
+  const srirangamCaption = cleanCaption(
+    SRIRANGAM_IMAGE_CAPTION.trim()
+      ? SRIRANGAM_IMAGE_CAPTION.replace("{date}", parts.label)
+      : `Srirangam Tamil Calendar ${parts.label}`
+  );
+
+  await sock.sendMessage(target.jid, { image: srirangam.buffer, caption: srirangamCaption });
+  console.log(`Sent Srirangam Tamil calendar image to ${target.label} group.`);
 
   // Give Baileys a moment to flush any session/key updates to disk.
   await new Promise((r) => setTimeout(r, 4000));

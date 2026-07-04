@@ -2,11 +2,22 @@ name: Daily Tamil Calendar to WhatsApp
 
 on:
   schedule:
-    # 18:31 UTC = 00:01 IST (UTC+5:30), every day.
-    # GitHub's scheduler is best-effort and can run a few minutes late; that is
-    # harmless here (a slightly late run still posts the correct new-day image).
-    - cron: "31 18 * * *"
-  workflow_dispatch: {} # manual run from the Actions tab
+    # Start early, then wait in-run until 18:31 UTC = 00:01 IST. This avoids most
+    # GitHub schedule dispatch jitter, but GitHub can still start the runner late.
+    - cron: "31 15 * * *"
+  workflow_dispatch:
+    inputs:
+      target_group:
+        description: "Where to send the images"
+        type: choice
+        default: "test"
+        options:
+          - test
+          - production
+      wait_for_send_time:
+        description: "Wait until 18:31 UTC before sending"
+        type: boolean
+        default: false
 
 permissions:
   contents: write # commit the refreshed session + heartbeat back to the repo
@@ -18,7 +29,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 220
     steps:
       - uses: actions/checkout@v4
 
@@ -28,14 +39,24 @@ jobs:
 
       - run: npm install
 
+      - name: Wait until exact send time
+        if: ${{ github.event_name == 'schedule' || inputs.wait_for_send_time }}
+        run: node src/waitForSendTime.js
+        env:
+          STRICT_SEND_UTC: "18:31"
+          STRICT_SEND_MAX_WAIT_MS: "14400000"
+
       - name: Download and post calendar image
         run: npm run send
         env:
           WA_CREDS: ${{ secrets.WA_CREDS }}
           WA_ENC_KEY: ${{ secrets.WA_ENC_KEY }}
           GROUP_JID: ${{ secrets.GROUP_JID }}
+          TEST_GROUP_JID: ${{ secrets.TEST_GROUP_JID }}
+          SEND_TARGET_GROUP: ${{ github.event_name == 'workflow_dispatch' && inputs.target_group || 'production' }}
           GH_PAT: ${{ secrets.GH_PAT }} # optional; session persists without it
           IMAGE_CAPTION: ${{ vars.IMAGE_CAPTION }}
+          SRIRANGAM_IMAGE_CAPTION: ${{ vars.SRIRANGAM_IMAGE_CAPTION }}
 
       # Always commit a heartbeat (and refreshed session if changed) so the repo
       # has daily activity -> scheduled cron is never auto-disabled, and the
