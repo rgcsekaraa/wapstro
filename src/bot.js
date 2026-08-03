@@ -22,7 +22,7 @@ import pino from "pino";
 import cron from "node-cron";
 import { partsFor, istDateParts } from "./download.js";
 import { getImage, cleanCaption } from "./image.js";
-import { downloadSrirangamForParts } from "./srirangam.js";
+import { postDailyImages } from "./postDaily.js";
 import { AUTH_DIR, restoreAuthDir, dumpAuthDir } from "./lib.js";
 import { interpret, partsToUTC, HELP } from "./commands.js";
 import { encryptSession, loadCredsBase64, STATE_DIR } from "./session.js";
@@ -233,33 +233,22 @@ async function maybeDaily(sock) {
   try {
     const parts = istDateParts();
     const primary = await getImage(parts);
-    const srirangam = await downloadSrirangamForParts(parts);
-
-    const primaryCaption = cleanCaption(
-      IMAGE_CAPTION.trim()
-        ? IMAGE_CAPTION.replace("{date}", parts.label)
-        : `Daily Raasi Palan ${parts.label}`
-    );
-    await sock.sendMessage(GROUP_JID, {
-      image: primary.buffer,
-      caption: primaryCaption,
-    });
-
-    const srirangamCaption = cleanCaption(
-      SRIRANGAM_IMAGE_CAPTION.trim()
-        ? SRIRANGAM_IMAGE_CAPTION.replace("{date}", parts.label)
-        : `Srirangam Tamil Calendar ${parts.label}`
-    );
-    await sock.sendMessage(GROUP_JID, {
-      image: srirangam.buffer,
-      caption: srirangamCaption,
+    const result = await postDailyImages({
+      sock,
+      jid: GROUP_JID,
+      targetLabel: "production",
+      parts,
+      primary,
+      imageCaption: IMAGE_CAPTION,
+      srirangamImageCaption: SRIRANGAM_IMAGE_CAPTION,
     });
 
     markPostedToday();
     persistSession();
+    const srirangamVia = result.srirangam?.via || "unavailable";
     console.log(
       `[daily] posted ${parts.label} to group ` +
-        `(primary via ${primary.via}; srirangam via ${srirangam.via}).`
+        `(primary via ${primary.via}; srirangam via ${srirangamVia}).`
     );
   } catch (e) {
     console.error(`[daily] FAILED: ${e.message}`);

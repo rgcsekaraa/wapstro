@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { interpret, MAX_RANGE_DAYS } from "../src/commands.js";
+import { partsFromIsoDate } from "../src/download.js";
 
 test("/date returns a single-date action", () => {
   const action = interpret("/date 24-05-2026");
@@ -49,4 +50,10 @@ test("/range rejects overly large ranges", () => {
 
   assert.equal(action.type, "error");
   assert.match(action.message, new RegExp(`${MAX_RANGE_DAYS}`));
+});
+
+test("parses a workflow backfill date strictly", () => {
+  assert.equal(partsFromIsoDate("2026-08-02").label, "02-08-2026");
+  assert.throws(() => partsFromIsoDate("2026-02-30"), /invalid calendar date/);
+  assert.throws(() => partsFromIsoDate("02-08-2026"), /YYYY-MM-DD/);
 });

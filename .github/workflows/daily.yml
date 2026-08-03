@@ -19,6 +19,10 @@ on:
         description: "Wait until 18:31 UTC before sending"
         type: boolean
         default: false
+      send_date:
+        description: "Optional IST date to backfill (YYYY-MM-DD); blank sends today"
+        type: string
+        required: false
 
 permissions:
   contents: write # commit the refreshed session + heartbeat back to the repo
@@ -58,6 +62,7 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }} # optional; session persists without it
           IMAGE_CAPTION: ${{ vars.IMAGE_CAPTION }}
           SRIRANGAM_IMAGE_CAPTION: ${{ vars.SRIRANGAM_IMAGE_CAPTION }}
+          SEND_DATE: ${{ github.event_name == 'workflow_dispatch' && inputs.send_date || '' }}
 
       # Always commit a heartbeat (and refreshed session if changed) so the repo
       # has daily activity -> scheduled cron is never auto-disabled, and the

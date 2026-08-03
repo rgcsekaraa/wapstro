@@ -6,9 +6,9 @@
 // session is re-encrypted to state/session.enc for the workflow to commit.
 
 import fs from "node:fs";
-import { istDateParts } from "./download.js";
-import { getImage, cleanCaption } from "./image.js";
-import { downloadSrirangamForParts } from "./srirangam.js";
+import { istDateParts, partsFromIsoDate } from "./download.js";
+import { getImage } from "./image.js";
+import { postDailyImages } from "./postDaily.js";
 import { connect } from "./connect.js";
 import { AUTH_DIR, restoreAuthDir, dumpAuthDir, updateRepoSecret } from "./lib.js";
 import { encryptSession, decryptSession, STATE_DIR } from "./session.js";
@@ -23,6 +23,7 @@ const {
   GITHUB_REPOSITORY,
   IMAGE_CAPTION = "",
   SRIRANGAM_IMAGE_CAPTION = "",
+  SEND_DATE = "",
 } = process.env;
 
 function fail(msg) {
@@ -69,37 +70,25 @@ async function main() {
   }
   restoreAuthDir(creds, AUTH_DIR);
 
-  const parts = istDateParts();
+  const parts = SEND_DATE.trim() ? partsFromIsoDate(SEND_DATE.trim()) : istDateParts();
 
   console.log("Resolving today's Tamil Daily Calendar image...");
   const primary = await getImage(parts);
   console.log(`Got ${primary.buffer.length} bytes from ${primary.url} (via ${primary.via})`);
 
-  console.log("Resolving today's Srirangam Tamil calendar image...");
-  const srirangam = await downloadSrirangamForParts(parts);
-  console.log(`Got ${srirangam.buffer.length} bytes from ${srirangam.url} (via ${srirangam.via})`);
-
   console.log("Connecting to WhatsApp...");
   const { sock } = await connect({ printQR: false });
   console.log("Connected.");
 
-  const caption = cleanCaption(
-    IMAGE_CAPTION.trim()
-      ? IMAGE_CAPTION.replace("{date}", parts.label)
-      : `Daily Raasi Palan ${parts.label}`
-  );
-
-  await sock.sendMessage(target.jid, { image: primary.buffer, caption });
-  console.log(`Sent Tamil Daily Calendar image to ${target.label} group.`);
-
-  const srirangamCaption = cleanCaption(
-    SRIRANGAM_IMAGE_CAPTION.trim()
-      ? SRIRANGAM_IMAGE_CAPTION.replace("{date}", parts.label)
-      : `Srirangam Tamil Calendar ${parts.label}`
-  );
-
-  await sock.sendMessage(target.jid, { image: srirangam.buffer, caption: srirangamCaption });
-  console.log(`Sent Srirangam Tamil calendar image to ${target.label} group.`);
+  const postResult = await postDailyImages({
+    sock,
+    jid: target.jid,
+    targetLabel: target.label,
+    parts,
+    primary,
+    imageCaption: IMAGE_CAPTION,
+    srirangamImageCaption: SRIRANGAM_IMAGE_CAPTION,
+  });
 
   // Give Baileys a moment to flush any session/key updates to disk.
   await new Promise((r) => setTimeout(r, 4000));
@@ -132,7 +121,11 @@ async function main() {
   // auto-disabled after 60 idle days). Committed by the workflow.
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.writeFileSync(`${STATE_DIR}/last-run.txt`, `${new Date().toISOString()} posted ${parts.label}\n`);
+    const srirangamStatus = postResult.srirangamSent ? "sent" : "unavailable";
+    fs.writeFileSync(
+      `${STATE_DIR}/last-run.txt`,
+      `${new Date().toISOString()} posted ${parts.label} srirangam=${srirangamStatus}\n`
+    );
   } catch {}
 
   // Close the socket WITHOUT logging out (logout would unlink the device).

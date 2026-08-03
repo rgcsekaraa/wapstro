@@ -35,6 +35,23 @@ export function istDateParts(now = new Date()) {
   return partsFor(d.getUTCDate(), d.getUTCMonth() + 1, d.getUTCFullYear());
 }
 
+export function partsFromIsoDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  if (!match) throw new Error(`date must be YYYY-MM-DD, got "${value}"`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error(`invalid calendar date "${value}"`);
+  }
+  return partsFor(day, month, year);
+}
+
 // The date-specific page that authoritatively references that day's image.
 export function datedPageUrl(parts) {
   return `${SITE}/tamil_daily_calendar.php?day=${parts.day}&month=${parts.mm}&year=${parts.year}&msg=Tamil%20Calendar%20Today`;
