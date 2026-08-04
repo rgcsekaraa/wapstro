@@ -196,6 +196,7 @@ always topped up without you doing anything.
 |---|---|
 | `fetch_year.py` | Pre-downloads ~1 year of images into `images/` (dependency-free). |
 | `src/download.js` | Live fetch of the day's image (IST date) via UA + Referer; scrape-first. |
+| `src/srirangam.js` | Fetches the Srirangam image with origin, alternate-host, and 415-safe proxy fallbacks. |
 | `src/connect.js` | Opens a Baileys connection from the stored session. |
 | `src/send.js` | The daily job: **cache-first** image → post to group → refresh `WA_CREDS`. |
 | `src/lib.js` | Session (de)serialization + GitHub secret update (libsodium). |
@@ -216,4 +217,5 @@ always topped up without you doing anything.
 - **Re-linking:** If WhatsApp logs out the linked device (rare, but possible after long gaps or a manual unlink), the job fails — just re-run `npm run link` and update the `WA_CREDS` secret.
 - **Secret size:** GitHub secrets cap at 64 KB. A single low-volume sender's session stays well under this.
 - **Image not yet published:** If the day's image isn't on the site at run time, the job errors out (no message sent) rather than posting a wrong/blank image.
+- **Srirangam origin blocks:** If Srirangam returns a transient HTTP 415 to a GitHub runner, the downloader tries both hostnames and then a public image proxy for the same date-specific image. The proxy URL contains no credentials or private data.
 - **Naming-pattern changes:** `send.js` follows whatever `<img src>` the dated page shows, so a rename won't break posting. A separate weekly canary (`.github/workflows/check-pattern.yml`, or `npm run check` locally) compares the live src against the known pattern and **fails (emailing you) if it drifts**, so you can update the fallback/docs.

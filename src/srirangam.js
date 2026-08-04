@@ -1,5 +1,9 @@
 const SITE = "https://srirangaminfo.com";
 const ALTERNATE_SITE = "https://www.srirangaminfo.com";
+// Srirangam's origin intermittently rejects GitHub-hosted runner egress with
+// HTTP 415. Weserv fetches the same public image from its own egress and is
+// used only after both origin hostnames fail.
+const IMAGE_PROXY_SITES = ["https://images.weserv.nl", "https://wsrv.nl"];
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -24,6 +28,12 @@ export function srirangamFallbackImageUrl(parts) {
 function srirangamFallbackImageUrls(parts) {
   const path = `/cal/${parts.year}/${parts.dd}${parts.mm}.jpg`;
   return [`${SITE}${path}`, `${ALTERNATE_SITE}${path}`];
+}
+
+function srirangamProxyImageUrls(parts) {
+  const originUrl = srirangamFallbackImageUrl(parts);
+  const encoded = encodeURIComponent(originUrl);
+  return IMAGE_PROXY_SITES.map((site) => `${site}/?url=${encoded}`);
 }
 
 function attr(tag, name) {
@@ -219,6 +229,7 @@ export async function downloadSrirangamForParts(
   }
 
   const fallbackUrls = srirangamFallbackImageUrls(parts);
+  let lastError = null;
   for (const [index, imageUrl] of fallbackUrls.entries()) {
     try {
       const buffer = await fetchImage(imageUrl, pageUrl, options);
@@ -227,8 +238,29 @@ export async function downloadSrirangamForParts(
         : "srirangam-fallback";
       return { buffer, url: imageUrl, parts, via };
     } catch (error) {
-      if (index === fallbackUrls.length - 1) throw error;
-      logger.warn(`Srirangam direct download failed (${error.message}); trying alternate host.`);
+      lastError = error;
+      if (index !== fallbackUrls.length - 1) {
+        logger.warn(`Srirangam direct download failed (${error.message}); trying alternate host.`);
+      }
     }
   }
+
+  // If both origin hostnames reject the request (notably with HTTP 415 from
+  // GitHub Actions egress), fetch the same public image through an image proxy.
+  // Do not proxy a genuine 404: that means the date's image is not available.
+  if (lastError?.status === 404) throw lastError;
+  const proxyUrls = srirangamProxyImageUrls(parts);
+  for (const [index, imageUrl] of proxyUrls.entries()) {
+    try {
+      const buffer = await fetchImage(imageUrl, pageUrl, options);
+      const via = index === 0 ? "srirangam-proxy-weserv" : "srirangam-proxy-wsrv";
+      return { buffer, url: imageUrl, parts, via };
+    } catch (error) {
+      lastError = error;
+      if (index !== proxyUrls.length - 1) {
+        logger.warn(`Srirangam proxy download failed (${error.message}); trying alternate proxy.`);
+      }
+    }
+  }
+  throw lastError;
 }
