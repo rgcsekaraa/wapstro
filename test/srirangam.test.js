@@ -123,3 +123,33 @@ test("uses the www host when the canonical host is rejected", async () => {
   assert.match(result.url, /^https:\/\/www\.srirangaminfo\.com\//);
   assert.equal(urls.length, 3);
 });
+
+test("uses an image proxy when both Srirangam hosts reject the image", async () => {
+  const parts = partsFor(4, 8, 2026);
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    if (urls.length === 1) {
+      return new Response("<html>temporary challenge</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }
+    if (urls.length <= 3) return new Response("blocked", { status: 415 });
+    return new Response(Buffer.alloc(6000), {
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+    });
+  };
+
+  const result = await downloadSrirangamForParts(parts, {
+    fetchImpl,
+    retryDelaysMs: [],
+    sleep: async () => {},
+    logger: { warn: () => {} },
+  });
+
+  assert.equal(result.via, "srirangam-proxy-weserv");
+  assert.match(result.url, /^https:\/\/images\.weserv\.nl\/\?url=/);
+  assert.equal(urls.length, 4);
+});
